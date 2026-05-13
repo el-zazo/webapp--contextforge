@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="100" height="100" rx="20" fill="url(#bg)"/>
+
+  <!-- Stacked documents (back to front) -->
+  <rect x="14" y="22" width="36" height="46" rx="4" fill="none" stroke="#4338ca" stroke-width="1.5" opacity="0.25"/>
+  <rect x="18" y="26" width="36" height="46" rx="4" fill="none" stroke="#6366f1" stroke-width="1.5" opacity="0.45"/>
+  <rect x="22" y="30" width="36" height="46" rx="4" fill="#1e1b4b" stroke="#818cf8" stroke-width="2"/>
+
+  <!-- Code lines on front document -->
+  <line x1="30" y1="42" x2="50" y2="42" stroke="#818cf8" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="30" y1="49" x2="46" y2="49" stroke="#6366f1" stroke-width="2" stroke-linecap="round" opacity="0.65"/>
+  <line x1="30" y1="56" x2="48" y2="56" stroke="#818cf8" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+  <line x1="30" y1="63" x2="40" y2="63" stroke="#6366f1" stroke-width="2" stroke-linecap="round" opacity="0.2"/>
+
+  <!-- Hammer handle -->
+  <line x1="46" y1="78" x2="76" y2="24" stroke="#92400e" stroke-width="4.5" stroke-linecap="round"/>
+
+  <!-- Hammer head (rotated to align perpendicular to handle) -->
+  <rect x="65" y="12" width="24" height="11" rx="3" fill="#f59e0b" transform="rotate(29 77 17.5)"/>
+
+  <!-- Impact sparks -->
+  <circle cx="92" cy="14" r="2.5" fill="#fbbf24"/>
+  <circle cx="88" cy="8" r="1.8" fill="#fbbf24" opacity="0.7"/>
+  <circle cx="94" cy="22" r="1.5" fill="#fbbf24" opacity="0.5"/>
+  <circle cx="86" cy="4" r="1.2" fill="#fbbf24" opacity="0.35"/>
+</svg>
