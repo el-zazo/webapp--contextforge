@@ -14,29 +14,11 @@ export default function FileTree() {
     return files.map((f) => ({
       ...f,
       isExcluded: isExcluded(f.name, false, excludedPatterns) ||
-        f.path.split('/').some((part, idx) => {
-          const subPath = f.path.split('/').slice(0, idx + 1).join('/');
-          const folderName = part;
-          return isExcluded(folderName, true, excludedPatterns);
+        f.path.split('/').some((part) => {
+          return isExcluded(part, true, excludedPatterns);
         }),
     }));
   }, [files, excludedPatterns]);
-
-  const filteredFiles = useMemo(() => {
-    let result = processedFiles.filter((f) => f.type === 'file');
-
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter((f) => f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q));
-    }
-
-    if (activeExtensions.length > 0) {
-      // Keep all files but mark non-matching
-      // We don't filter out entirely, we just mark them
-    }
-
-    return result;
-  }, [processedFiles, searchQuery, activeExtensions]);
 
   const searchMatchPaths = useMemo(() => {
     if (!searchQuery) return null;
@@ -45,7 +27,7 @@ export default function FileTree() {
     processedFiles.forEach((f) => {
       if (f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q)) {
         matches.add(f.path);
-        // Add all parent paths
+        // Add all parent paths so ancestor folders stay visible
         const parts = f.path.split('/');
         for (let i = 1; i <= parts.length; i++) {
           matches.add(parts.slice(0, i).join('/'));
@@ -130,6 +112,8 @@ export default function FileTree() {
   );
 }
 
+// ─── Tree Building & Sorting ────────────────────────────────────────────────────
+
 function buildTree(files, sortBy) {
   const root = { path: '', subfolders: {}, files: [] };
 
@@ -158,31 +142,75 @@ function buildTree(files, sortBy) {
     }
   });
 
-  // Sort
   sortTree(root, sortBy);
 
   return root;
 }
 
+/**
+ * Sort files and subfolders at every level of the tree.
+ *
+ * Folders are always shown before files at each level.
+ * Folder sort rules per option:
+ *   Name A→Z / Size ↑ / Size ↓ / Ext A→Z  →  folders A→Z by name
+ *   Name Z→A                                 →  folders Z→A by name
+ *
+ * File sort rules:
+ *   Name A→Z / default  →  A→Z
+ *   Name Z→A            →  Z→A
+ *   Size ↑              →  size ascending
+ *   Size ↓              →  size descending
+ *   Ext A→Z             →  extension A→Z
+ */
 function sortTree(node, sortBy) {
-  node.files.sort((a, b) => {
-    switch (sortBy) {
-      case 'name-asc': return a.name.localeCompare(b.name);
-      case 'name-desc': return b.name.localeCompare(a.name);
-      case 'size-asc': return a.size - b.size;
-      case 'size-desc': return b.size - a.size;
-      case 'ext-asc': return a.extension.localeCompare(b.extension);
-      default: return a.name.localeCompare(b.name);
-    }
-  });
+  // Sort files within this node
+  node.files.sort(getFileComparator(sortBy));
 
+  // Sort subfolders within this node by rebuilding in sorted key order
+  const sortedKeys = Object.keys(node.subfolders).sort(getFolderComparator(sortBy));
+  const sorted = {};
+  sortedKeys.forEach((key) => {
+    sorted[key] = node.subfolders[key];
+  });
+  node.subfolders = sorted;
+
+  // Recurse into children
   Object.values(node.subfolders).forEach((sub) => sortTree(sub, sortBy));
 }
+
+function getFileComparator(sortBy) {
+  switch (sortBy) {
+    case 'name-asc':
+      return (a, b) => a.name.localeCompare(b.name);
+    case 'name-desc':
+      return (a, b) => b.name.localeCompare(a.name);
+    case 'size-asc':
+      return (a, b) => a.size - b.size;
+    case 'size-desc':
+      return (a, b) => b.size - a.size;
+    case 'ext-asc':
+      return (a, b) => a.extension.localeCompare(b.extension);
+    default:
+      return (a, b) => a.name.localeCompare(b.name);
+  }
+}
+
+function getFolderComparator(sortBy) {
+  switch (sortBy) {
+    case 'name-desc':
+      return (a, b) => b.localeCompare(a);
+    default:
+      // Size ↑, Size ↓, Ext A→Z, Name A→Z — folders always A→Z
+      return (a, b) => a.localeCompare(b);
+  }
+}
+
+// ─── Rendering ───────────────────────────────────────────────────────────────────
 
 function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns) {
   const children = [];
 
-  // Render subfolders
+  // Render subfolders (already sorted by sortTree)
   Object.entries(folder.subfolders).forEach(([name, sub]) => {
     const hasMatchingChild = folderChildMatchCache[sub.path] || false;
     const matchesSearch = searchMatchPaths ? searchMatchPaths.has(sub.path) : true;
@@ -214,9 +242,8 @@ function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove,
     );
   });
 
-  // Render files
+  // Render files (already sorted by sortTree)
   folder.files.forEach((file) => {
-    const matchesSearch = matchCache[file.path] !== false;
     const fileNode = {
       id: file.id,
       name: file.name,
@@ -245,8 +272,13 @@ function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove,
   return <>{children}</>;
 }
 
+/**
+ * Count ALL files recursively inside a folder node, regardless of
+ * excluded status or binary status.  Only file nodes are counted,
+ * not folder nodes themselves.
+ */
 function countFilesRecursive(folder) {
-  let count = folder.files.filter((f) => !f.isExcluded).length;
+  let count = folder.files.length;
   Object.values(folder.subfolders).forEach((sub) => {
     count += countFilesRecursive(sub);
   });

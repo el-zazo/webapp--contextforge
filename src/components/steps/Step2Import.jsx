@@ -1,10 +1,18 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { FolderOpen, ArrowLeft, Zap, X, Trash2, Folder } from 'lucide-react';
+import {
+  FolderOpen,
+  ArrowLeft,
+  Zap,
+  X,
+  Trash2,
+  Folder,
+  AlertTriangle,
+} from 'lucide-react';
 import useFileStore from '../../store/useFileStore';
 import useConfigStore from '../../store/useConfigStore';
 import useSelectionStore from '../../store/useSelectionStore';
-import { processFiles } from '../../core/fileProcessor';
-import { isExcluded, formatFileSize, formatCharCount, getUniqueExtensions } from '../../utils/fileUtils';
+import { processFiles, processDroppedEntries } from '../../core/fileProcessor';
+import { isExcluded, formatFileSize, formatCharCount } from '../../utils/fileUtils';
 import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 import ConfirmDialog from '../ui/ConfirmDialog';
@@ -17,44 +25,102 @@ export default function Step2Import({ onBack, onNext }) {
   const { rootName, files, setRootName, setFiles, clearFiles } = useFileStore();
   const { excludedPatterns } = useConfigStore();
   const { selectedFiles, addFile, removeFile, clearSelection, setGeneratedMessages } = useSelectionStore();
+
   const fileInputRef = useRef(null);
   const [showChangeDialog, setShowChangeDialog] = useState(false);
   const [showClearAllDialog, setShowClearAllDialog] = useState(false);
   const [showRemoveFileDialog, setShowRemoveFileDialog] = useState(null);
+  const [showRemoveExcludedDialog, setShowRemoveExcludedDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Drag & Drop state — use a counter so child enter/leave events don't flicker
+  const [dragCounter, setDragCounter] = useState(0);
+  const isDragOver = dragCounter > 0;
 
   const hasImported = files.length > 0;
 
+  // ── helpers: apply exclusion flags to processed files ──────────────────────
+  const applyExclusionFlags = useCallback(
+    (fileList) =>
+      fileList.map((f) => ({
+        ...f,
+        isExcluded:
+          isExcluded(f.name, false, excludedPatterns) ||
+          f.path.split('/').some((part) =>
+            isExcluded(part, true, excludedPatterns)
+          ),
+      })),
+    [excludedPatterns]
+  );
+
+  // ── handlers: button import ───────────────────────────────────────────────
   const handleImportClick = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
 
-  const handleFileInput = useCallback(async (e) => {
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
+  const handleFileInput = useCallback(
+    async (e) => {
+      const fileList = e.target.files;
+      if (!fileList || fileList.length === 0) return;
 
-    setIsLoading(true);
-    try {
-      const { rootName: name, files: processedFiles } = await processFiles(fileList);
-      const withExclusion = processedFiles.map((f) => ({
-        ...f,
-        isExcluded:
-          isExcluded(f.name, false, excludedPatterns) ||
-          f.path.split('/').some((part, idx) => {
-            const folderName = part;
-            return isExcluded(folderName, true, excludedPatterns);
-          }),
-      }));
-      setRootName(name);
-      setFiles(withExclusion);
-    } catch (err) {
-      console.error('Error processing files:', err);
-    }
-    setIsLoading(false);
-    // Reset input so same folder can be re-imported
-    e.target.value = '';
-  }, [excludedPatterns, setRootName, setFiles]);
+      setIsLoading(true);
+      try {
+        const { rootName: name, files: processed } = await processFiles(fileList);
+        setRootName(name);
+        setFiles(applyExclusionFlags(processed));
+      } catch (err) {
+        console.error('Error processing files:', err);
+      }
+      setIsLoading(false);
+      e.target.value = '';
+    },
+    [applyExclusionFlags, setRootName, setFiles]
+  );
 
+  // ── handlers: drag & drop ─────────────────────────────────────────────────
+  const handleDragEnter = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragCounter((c) => c + 1);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragCounter((c) => c - 1);
+  }, []);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(
+    async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragCounter(0);
+
+      const items = e.dataTransfer?.items;
+      if (!items || items.length === 0) return;
+
+      setIsLoading(true);
+      try {
+        const { rootName: name, files: processed } =
+          await processDroppedEntries(items);
+        if (processed.length > 0) {
+          setRootName(name);
+          setFiles(applyExclusionFlags(processed));
+        }
+      } catch (err) {
+        console.error('Error processing dropped files:', err);
+      }
+      setIsLoading(false);
+    },
+    [applyExclusionFlags, setRootName, setFiles]
+  );
+
+  // ── handlers: navigation / misc ───────────────────────────────────────────
   const handleChangeFolder = useCallback(() => {
     if (selectedFiles.length > 0 || files.length > 0) {
       setShowChangeDialog(true);
@@ -84,14 +150,36 @@ export default function Step2Import({ onBack, onNext }) {
     onNext();
   }, [selectedFiles, files, setGeneratedMessages, onNext]);
 
-  // Selected files data
+  // ── derived data ──────────────────────────────────────────────────────────
   const selectedFileData = selectedFiles
     .map((id) => files.find((f) => f.id === id))
     .filter(Boolean);
 
-  const totalChars = selectedFileData.reduce((sum, f) => sum + (f.content?.length || 0), 0);
+  const totalChars = selectedFileData.reduce(
+    (sum, f) => sum + (f.content?.length || 0),
+    0
+  );
 
-  // Import zone
+  // Determine which selected files are now excluded by the current patterns
+  const excludedSelectedFiles = selectedFileData.filter(
+    (f) =>
+      isExcluded(f.name, false, excludedPatterns) ||
+      f.path.split('/').some((part) => isExcluded(part, true, excludedPatterns))
+  );
+
+  const excludedSelectedCount = excludedSelectedFiles.length;
+
+  const confirmRemoveExcluded = useCallback(() => {
+    const excludedIds = new Set(excludedSelectedFiles.map((f) => f.id));
+    // Remove each excluded file; we build a new selection without them
+    const remaining = selectedFiles.filter((id) => !excludedIds.has(id));
+    // Replace selection by clearing then re-adding
+    clearSelection();
+    remaining.forEach((id) => addFile(id));
+    setShowRemoveExcludedDialog(false);
+  }, [excludedSelectedFiles, selectedFiles, clearSelection, addFile]);
+
+  // ── render: import zone (before folder is imported) ───────────────────────
   if (!hasImported) {
     return (
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-12">
@@ -104,28 +192,77 @@ export default function Step2Import({ onBack, onNext }) {
           className="hidden"
         />
 
+        {/* Browser Permission Notice — Issue 2 */}
+        <div className="mb-6 flex items-start gap-3 px-4 py-3 bg-warning/5 border border-warning/20 rounded-lg">
+          <AlertTriangle size={18} className="text-warning flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-warning">Browser Permission Notice</p>
+            <p className="text-xs text-text-secondary mt-1 leading-relaxed">
+              When importing folders with many files, your browser may show a native
+              confirmation dialog. This is a browser security feature and is completely
+              normal. Click&nbsp;
+              <span className="font-semibold text-text-primary">"Import"</span> or{' '}
+              <span className="font-semibold text-text-primary">"Allow"</span> to proceed.
+            </p>
+          </div>
+        </div>
+
+        {/* Drop zone — Issue 1 */}
         <div
           onClick={handleImportClick}
-          className="flex flex-col items-center justify-center py-20 px-8 bg-bg-surface border-2 border-dashed border-border rounded-2xl cursor-pointer hover:border-accent/50 hover:bg-bg-surface2/50 transition-all duration-200 group"
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          className={`
+            flex flex-col items-center justify-center py-20 px-8
+            bg-bg-surface border-2 border-dashed rounded-2xl cursor-pointer
+            transition-all duration-200 group
+            ${isDragOver
+              ? 'border-accent bg-accent/5 shadow-lg shadow-accent/10'
+              : 'border-border hover:border-accent/50 hover:bg-bg-surface2/50'
+            }
+          `}
         >
-          <div className="w-16 h-16 rounded-2xl bg-accent/10 flex items-center justify-center mb-5 group-hover:bg-accent/20 transition-colors">
-            <Folder size={32} className="text-accent" />
+          <div
+            className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-5 transition-colors ${
+              isDragOver ? 'bg-accent/20' : 'bg-accent/10 group-hover:bg-accent/20'
+            }`}
+          >
+            <Folder size={32} className={`transition-colors ${isDragOver ? 'text-accent' : 'text-accent'}`} />
           </div>
-          <h3 className="text-lg font-semibold text-text-primary mb-2">
-            Import your project folder
-          </h3>
-          <p className="text-sm text-text-secondary mb-6 text-center">
-            Select a folder to explore its structure
-          </p>
-          <Button onClick={(e) => { e.stopPropagation(); handleImportClick(); }}>
-            <FolderOpen size={16} />
-            Import Folder
-          </Button>
+
+          {isDragOver ? (
+            <>
+              <h3 className="text-lg font-semibold text-accent mb-2">
+                Drop your folder here
+              </h3>
+              <p className="text-sm text-text-secondary text-center">
+                Release to import the folder
+              </p>
+            </>
+          ) : (
+            <>
+              <h3 className="text-lg font-semibold text-text-primary mb-2">
+                Import your project folder
+              </h3>
+              <p className="text-sm text-text-secondary mb-6 text-center">
+                Select a folder to explore its structure
+              </p>
+              <Button onClick={(e) => { e.stopPropagation(); handleImportClick(); }}>
+                <FolderOpen size={16} />
+                Import Folder
+              </Button>
+              <p className="text-xs text-text-muted mt-4 text-center">
+                You can also drag &amp; drop a folder directly onto this area
+              </p>
+            </>
+          )}
         </div>
 
         {isLoading && (
           <div className="text-center mt-4 text-sm text-text-secondary">
-            Processing files...
+            Processing files…
           </div>
         )}
 
@@ -136,6 +273,7 @@ export default function Step2Import({ onBack, onNext }) {
           </Button>
         </div>
 
+        {/* Confirm dialog for change-folder (kept for parity) */}
         <ConfirmDialog
           isOpen={showChangeDialog}
           title="Change Folder"
@@ -150,7 +288,7 @@ export default function Step2Import({ onBack, onNext }) {
     );
   }
 
-  // Two-panel layout
+  // ── render: two-panel layout (after import) ──────────────────────────────
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
       <input
@@ -163,9 +301,8 @@ export default function Step2Import({ onBack, onNext }) {
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left panel - File Explorer */}
+        {/* ── Left panel — File Explorer ── */}
         <div className="bg-bg-surface border border-border rounded-xl overflow-hidden flex flex-col">
-          {/* Explorer header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-surface2/30">
             <div className="flex items-center gap-2 min-w-0">
               <FolderOpen size={16} className="text-warning flex-shrink-0" />
@@ -179,23 +316,18 @@ export default function Step2Import({ onBack, onNext }) {
             </Button>
           </div>
 
-          {/* Search */}
           <div className="px-4 py-3 border-b border-border-subtle">
             <SearchBar />
           </div>
-
-          {/* Filter & Sort */}
           <div className="px-4 py-2 border-b border-border-subtle">
             <FilterSort />
           </div>
-
-          {/* File Tree */}
           <div className="flex-1 overflow-auto p-2">
             <FileTree />
           </div>
         </div>
 
-        {/* Right panel - Selected Files */}
+        {/* ── Right panel — Selected Files ── */}
         <div className="bg-bg-surface border border-border rounded-xl overflow-hidden flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-surface2/30">
@@ -207,6 +339,28 @@ export default function Step2Import({ onBack, onNext }) {
             </div>
           </div>
 
+          {/* Excluded-files banner — Issue 3 */}
+          {excludedSelectedCount > 0 && (
+            <div className="mx-4 mt-3 flex items-start gap-3 px-3 py-2.5 bg-warning/5 border border-warning/20 rounded-lg">
+              <AlertTriangle size={16} className="text-warning flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  <span className="font-semibold text-warning">{excludedSelectedCount}</span>{' '}
+                  selected file{excludedSelectedCount !== 1 ? 's' : ''} {' '}
+                  {excludedSelectedCount !== 1 ? 'are' : 'is'} now excluded by your configuration.
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowRemoveExcludedDialog(true)}
+                className="flex-shrink-0 text-warning hover:text-warning text-xs"
+              >
+                Remove All Excluded
+              </Button>
+            </div>
+          )}
+
           {/* File list */}
           <div className="flex-1 overflow-auto p-4 space-y-2 min-h-[200px]">
             {selectedFileData.length === 0 ? (
@@ -216,25 +370,50 @@ export default function Step2Import({ onBack, onNext }) {
                 <p className="text-xs mt-1">Use the [+] buttons in the explorer.</p>
               </div>
             ) : (
-              selectedFileData.map((file) => (
-                <div
-                  key={file.id}
-                  className="flex items-center gap-3 px-3 py-2 bg-bg-surface2 rounded-lg border border-border-subtle group"
-                >
-                  <span className="text-xs font-mono text-text-secondary truncate flex-1 min-w-0">
-                    {file.path}
-                  </span>
-                  <Badge color="muted">{formatFileSize(file.size)}</Badge>
-                  <Badge color="info">{formatCharCount(file.content?.length || 0)}</Badge>
-                  <button
-                    onClick={() => setShowRemoveFileDialog(file)}
-                    className="flex-shrink-0 text-text-muted hover:text-danger transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
-                    title="Remove from selection"
+              selectedFileData.map((file) => {
+                const fileNowExcluded =
+                  isExcluded(file.name, false, excludedPatterns) ||
+                  file.path.split('/').some((part) =>
+                    isExcluded(part, true, excludedPatterns)
+                  );
+
+                return (
+                  <div
+                    key={file.id}
+                    className={`
+                      flex items-center gap-3 px-3 py-2 bg-bg-surface2 rounded-lg border group
+                      transition-colors duration-150
+                      ${fileNowExcluded
+                        ? 'opacity-60 border-warning/20'
+                        : 'border-border-subtle'
+                      }
+                    `}
                   >
-                    <X size={14} />
-                  </button>
-                </div>
-              ))
+                    <span
+                      className={`text-xs font-mono truncate flex-1 min-w-0 ${
+                        fileNowExcluded ? 'text-text-muted' : 'text-text-secondary'
+                      }`}
+                    >
+                      {file.path}
+                    </span>
+
+                    {fileNowExcluded && (
+                      <Badge color="warning">Excluded</Badge>
+                    )}
+
+                    <Badge color="muted">{formatFileSize(file.size)}</Badge>
+                    <Badge color="info">{formatCharCount(file.content?.length || 0)}</Badge>
+
+                    <button
+                      onClick={() => setShowRemoveFileDialog(file)}
+                      className="flex-shrink-0 text-text-muted hover:text-danger transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+                      title="Remove from selection"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                );
+              })
             )}
           </div>
 
@@ -271,7 +450,8 @@ export default function Step2Import({ onBack, onNext }) {
         </Button>
       </div>
 
-      {/* Dialogs */}
+      {/* ── Dialogs ──────────────────────────────────────────────────────────── */}
+
       <ConfirmDialog
         isOpen={showChangeDialog}
         title="Change Folder"
@@ -311,6 +491,17 @@ export default function Step2Import({ onBack, onNext }) {
           setShowRemoveFileDialog(null);
         }}
         onCancel={() => setShowRemoveFileDialog(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={showRemoveExcludedDialog}
+        title="Remove Excluded Files"
+        message={`This will remove ${excludedSelectedCount} excluded file${excludedSelectedCount !== 1 ? 's' : ''} from your selection. Do you want to continue?`}
+        confirmLabel="Remove Excluded"
+        cancelLabel="Cancel"
+        isDangerous
+        onConfirm={confirmRemoveExcluded}
+        onCancel={() => setShowRemoveExcludedDialog(false)}
       />
     </div>
   );

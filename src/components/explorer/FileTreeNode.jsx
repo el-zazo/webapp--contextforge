@@ -8,10 +8,8 @@ import {
   Minus,
   Lock,
   Image,
-  File,
 } from 'lucide-react';
 import Badge from '../ui/Badge';
-import Button from '../ui/Button';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { formatFileSize, formatCharCount } from '../../utils/fileUtils';
 
