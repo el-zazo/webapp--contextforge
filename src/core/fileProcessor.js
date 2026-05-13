@@ -1,4 +1,4 @@
-import { isBinaryFile, getExtension, isExcluded } from '../utils/fileUtils';
+import { isBinaryFile, getExtension } from '../utils/fileUtils';
 
 function generateId() {
   return Math.random().toString(36).substring(2, 11);

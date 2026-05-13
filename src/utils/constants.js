@@ -9,6 +9,8 @@ export const DEFAULT_EXCLUDED_PATTERNS = [
   '*.log',
 ];
 
+export const DEFAULT_CASE_SENSITIVE_PATTERNS = true;
+
 export const BINARY_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico',
   '.mp4', '.mp3', '.wav', '.ogg', '.avi', '.mov',

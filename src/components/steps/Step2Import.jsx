@@ -12,7 +12,7 @@ import useFileStore from '../../store/useFileStore';
 import useConfigStore from '../../store/useConfigStore';
 import useSelectionStore from '../../store/useSelectionStore';
 import { processFiles, processDroppedEntries } from '../../core/fileProcessor';
-import { isExcluded, formatFileSize, formatCharCount } from '../../utils/fileUtils';
+import { isFileExcluded, formatFileSize, formatCharCount } from '../../utils/fileUtils';
 import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 import ConfirmDialog from '../ui/ConfirmDialog';
@@ -23,7 +23,7 @@ import { generateMessages } from '../../core/messageSplitter';
 
 export default function Step2Import({ onBack, onNext }) {
   const { rootName, files, setRootName, setFiles, clearFiles } = useFileStore();
-  const { excludedPatterns } = useConfigStore();
+  const { excludedPatterns, caseSensitivePatterns } = useConfigStore();
   const { selectedFiles, addFile, removeFile, clearSelection, setGeneratedMessages } = useSelectionStore();
 
   const fileInputRef = useRef(null);
@@ -44,13 +44,9 @@ export default function Step2Import({ onBack, onNext }) {
     (fileList) =>
       fileList.map((f) => ({
         ...f,
-        isExcluded:
-          isExcluded(f.name, false, excludedPatterns) ||
-          f.path.split('/').some((part) =>
-            isExcluded(part, true, excludedPatterns)
-          ),
+        isExcluded: isFileExcluded(f, excludedPatterns, caseSensitivePatterns),
       })),
-    [excludedPatterns]
+    [excludedPatterns, caseSensitivePatterns]
   );
 
   // ── handlers: button import ───────────────────────────────────────────────
@@ -162,18 +158,14 @@ export default function Step2Import({ onBack, onNext }) {
 
   // Determine which selected files are now excluded by the current patterns
   const excludedSelectedFiles = selectedFileData.filter(
-    (f) =>
-      isExcluded(f.name, false, excludedPatterns) ||
-      f.path.split('/').some((part) => isExcluded(part, true, excludedPatterns))
+    (f) => isFileExcluded(f, excludedPatterns, caseSensitivePatterns)
   );
 
   const excludedSelectedCount = excludedSelectedFiles.length;
 
   const confirmRemoveExcluded = useCallback(() => {
     const excludedIds = new Set(excludedSelectedFiles.map((f) => f.id));
-    // Remove each excluded file; we build a new selection without them
     const remaining = selectedFiles.filter((id) => !excludedIds.has(id));
-    // Replace selection by clearing then re-adding
     clearSelection();
     remaining.forEach((id) => addFile(id));
     setShowRemoveExcludedDialog(false);
@@ -192,7 +184,7 @@ export default function Step2Import({ onBack, onNext }) {
           className="hidden"
         />
 
-        {/* Browser Permission Notice — Issue 2 */}
+        {/* Browser Permission Notice */}
         <div className="mb-6 flex items-start gap-3 px-4 py-3 bg-warning/5 border border-warning/20 rounded-lg">
           <AlertTriangle size={18} className="text-warning flex-shrink-0 mt-0.5" />
           <div>
@@ -207,7 +199,7 @@ export default function Step2Import({ onBack, onNext }) {
           </div>
         </div>
 
-        {/* Drop zone — Issue 1 */}
+        {/* Drop zone */}
         <div
           onClick={handleImportClick}
           onDragEnter={handleDragEnter}
@@ -229,7 +221,7 @@ export default function Step2Import({ onBack, onNext }) {
               isDragOver ? 'bg-accent/20' : 'bg-accent/10 group-hover:bg-accent/20'
             }`}
           >
-            <Folder size={32} className={`transition-colors ${isDragOver ? 'text-accent' : 'text-accent'}`} />
+            <Folder size={32} className="text-accent" />
           </div>
 
           {isDragOver ? (
@@ -273,7 +265,6 @@ export default function Step2Import({ onBack, onNext }) {
           </Button>
         </div>
 
-        {/* Confirm dialog for change-folder (kept for parity) */}
         <ConfirmDialog
           isOpen={showChangeDialog}
           title="Change Folder"
@@ -339,7 +330,7 @@ export default function Step2Import({ onBack, onNext }) {
             </div>
           </div>
 
-          {/* Excluded-files banner — Issue 3 */}
+          {/* Excluded-files banner */}
           {excludedSelectedCount > 0 && (
             <div className="mx-4 mt-3 flex items-start gap-3 px-3 py-2.5 bg-warning/5 border border-warning/20 rounded-lg">
               <AlertTriangle size={16} className="text-warning flex-shrink-0 mt-0.5" />
@@ -371,11 +362,11 @@ export default function Step2Import({ onBack, onNext }) {
               </div>
             ) : (
               selectedFileData.map((file) => {
-                const fileNowExcluded =
-                  isExcluded(file.name, false, excludedPatterns) ||
-                  file.path.split('/').some((part) =>
-                    isExcluded(part, true, excludedPatterns)
-                  );
+                const fileNowExcluded = isFileExcluded(
+                  file,
+                  excludedPatterns,
+                  caseSensitivePatterns
+                );
 
                 return (
                   <div

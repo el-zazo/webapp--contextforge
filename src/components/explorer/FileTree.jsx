@@ -3,22 +3,19 @@ import useFileStore from '../../store/useFileStore';
 import useConfigStore from '../../store/useConfigStore';
 import useSelectionStore from '../../store/useSelectionStore';
 import FileTreeNode from './FileTreeNode';
-import { isExcluded } from '../../utils/fileUtils';
+import { isExcluded, isFileExcluded } from '../../utils/fileUtils';
 
 export default function FileTree() {
   const { files, rootName, searchQuery, activeExtensions, sortBy } = useFileStore();
-  const { excludedPatterns } = useConfigStore();
+  const { excludedPatterns, caseSensitivePatterns } = useConfigStore();
   const { selectedFiles, addFile, removeFile } = useSelectionStore();
 
   const processedFiles = useMemo(() => {
     return files.map((f) => ({
       ...f,
-      isExcluded: isExcluded(f.name, false, excludedPatterns) ||
-        f.path.split('/').some((part) => {
-          return isExcluded(part, true, excludedPatterns);
-        }),
+      isExcluded: isFileExcluded(f, excludedPatterns, caseSensitivePatterns),
     }));
-  }, [files, excludedPatterns]);
+  }, [files, excludedPatterns, caseSensitivePatterns]);
 
   const searchMatchPaths = useMemo(() => {
     if (!searchQuery) return null;
@@ -27,7 +24,6 @@ export default function FileTree() {
     processedFiles.forEach((f) => {
       if (f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q)) {
         matches.add(f.path);
-        // Add all parent paths so ancestor folders stay visible
         const parts = f.path.split('/');
         for (let i = 1; i <= parts.length; i++) {
           matches.add(parts.slice(0, i).join('/'));
@@ -107,7 +103,7 @@ export default function FileTree() {
 
   return (
     <div className="overflow-auto max-h-[calc(100vh-320px)]">
-      {renderFolder(tree, '', 0, selectedFiles, handleAddFile, handleRemoveFile, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns)}
+      {renderFolder(tree, '', 0, selectedFiles, handleAddFile, handleRemoveFile, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns, caseSensitivePatterns)}
     </div>
   );
 }
@@ -163,10 +159,8 @@ function buildTree(files, sortBy) {
  *   Ext A→Z             →  extension A→Z
  */
 function sortTree(node, sortBy) {
-  // Sort files within this node
   node.files.sort(getFileComparator(sortBy));
 
-  // Sort subfolders within this node by rebuilding in sorted key order
   const sortedKeys = Object.keys(node.subfolders).sort(getFolderComparator(sortBy));
   const sorted = {};
   sortedKeys.forEach((key) => {
@@ -174,7 +168,6 @@ function sortTree(node, sortBy) {
   });
   node.subfolders = sorted;
 
-  // Recurse into children
   Object.values(node.subfolders).forEach((sub) => sortTree(sub, sortBy));
 }
 
@@ -200,21 +193,24 @@ function getFolderComparator(sortBy) {
     case 'name-desc':
       return (a, b) => b.localeCompare(a);
     default:
-      // Size ↑, Size ↓, Ext A→Z, Name A→Z — folders always A→Z
       return (a, b) => a.localeCompare(b);
   }
 }
 
 // ─── Rendering ───────────────────────────────────────────────────────────────────
 
-function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns) {
+function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns, caseSensitive) {
   const children = [];
 
   // Render subfolders (already sorted by sortTree)
   Object.entries(folder.subfolders).forEach(([name, sub]) => {
     const hasMatchingChild = folderChildMatchCache[sub.path] || false;
     const matchesSearch = searchMatchPaths ? searchMatchPaths.has(sub.path) : true;
-    const folderIsExcluded = isExcluded(name, true, excludedPatterns);
+    const folderIsExcluded = isExcluded(
+      { name, path: sub.path },
+      excludedPatterns,
+      caseSensitive
+    );
     const folderNode = {
       id: `folder-${sub.path}`,
       name,
@@ -224,7 +220,7 @@ function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove,
       isExcluded: folderIsExcluded,
     };
 
-    const subChildren = renderFolder(sub, name, depth + 1, selectedFiles, onAdd, onRemove, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns);
+    const subChildren = renderFolder(sub, name, depth + 1, selectedFiles, onAdd, onRemove, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns, caseSensitive);
 
     children.push(
       <FileTreeNode
@@ -274,8 +270,7 @@ function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove,
 
 /**
  * Count ALL files recursively inside a folder node, regardless of
- * excluded status or binary status.  Only file nodes are counted,
- * not folder nodes themselves.
+ * excluded status or binary status.
  */
 function countFilesRecursive(folder) {
   let count = folder.files.length;
