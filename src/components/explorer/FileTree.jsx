@@ -3,12 +3,12 @@ import useFileStore from '../../store/useFileStore';
 import useConfigStore from '../../store/useConfigStore';
 import useSelectionStore from '../../store/useSelectionStore';
 import FileTreeNode from './FileTreeNode';
-import { isExcluded, isFileExcluded } from '../../utils/fileUtils';
+import { isExcluded, isFileExcluded, collectFolderFiles } from '../../utils/fileUtils';
 
 export default function FileTree() {
   const { files, rootName, searchQuery, activeExtensions, sortBy } = useFileStore();
   const { excludedPatterns, caseSensitivePatterns } = useConfigStore();
-  const { selectedFiles, addFile, removeFile } = useSelectionStore();
+  const { selectedFiles, addFile, addFiles, removeFile } = useSelectionStore();
 
   const processedFiles = useMemo(() => {
     return files.map((f) => ({
@@ -93,6 +93,18 @@ export default function FileTree() {
     [removeFile]
   );
 
+  const handleAddFolder = useCallback(
+    (folderPath) => {
+      const treeNode = findTreeNode(tree, folderPath);
+      if (!treeNode) return;
+      const fileIds = collectFolderFiles(treeNode, excludedPatterns, caseSensitivePatterns);
+      if (fileIds.length > 0) {
+        addFiles(fileIds);
+      }
+    },
+    [tree, excludedPatterns, caseSensitivePatterns, addFiles]
+  );
+
   if (processedFiles.length === 0) {
     return (
       <div className="text-center py-12 text-text-muted text-sm">
@@ -103,9 +115,29 @@ export default function FileTree() {
 
   return (
     <div className="overflow-auto max-h-[calc(100vh-320px)]">
-      {renderFolder(tree, '', 0, selectedFiles, handleAddFile, handleRemoveFile, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns, caseSensitivePatterns)}
+      {renderFolder(tree, '', 0, selectedFiles, handleAddFile, handleRemoveFile, handleAddFolder, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns, caseSensitivePatterns)}
     </div>
   );
+}
+
+// ─── Tree lookup ──────────────────────────────────────────────────────────────────
+
+/**
+ * Navigate the tree to find the subtree node at the given path.
+ * Returns `null` if the path does not exist.
+ */
+function findTreeNode(tree, path) {
+  if (!path) return tree;
+  const parts = path.split('/');
+  let current = tree;
+  for (const part of parts) {
+    if (current.subfolders && current.subfolders[part]) {
+      current = current.subfolders[part];
+    } else {
+      return null;
+    }
+  }
+  return current;
 }
 
 // ─── Tree Building & Sorting ────────────────────────────────────────────────────
@@ -199,7 +231,7 @@ function getFolderComparator(sortBy) {
 
 // ─── Rendering ───────────────────────────────────────────────────────────────────
 
-function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns, caseSensitive) {
+function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove, onAddFolder, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns, caseSensitive) {
   const children = [];
 
   // Render subfolders (already sorted by sortTree)
@@ -220,7 +252,7 @@ function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove,
       isExcluded: folderIsExcluded,
     };
 
-    const subChildren = renderFolder(sub, name, depth + 1, selectedFiles, onAdd, onRemove, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns, caseSensitive);
+    const subChildren = renderFolder(sub, name, depth + 1, selectedFiles, onAdd, onRemove, onAddFolder, matchCache, folderChildMatchCache, searchMatchPaths, extMatchPaths, excludedPatterns, caseSensitive);
 
     children.push(
       <FileTreeNode
@@ -229,6 +261,7 @@ function renderFolder(folder, folderName, depth, selectedFiles, onAdd, onRemove,
         selectedFileIds={selectedFiles}
         onAddFile={onAdd}
         onRemoveFile={onRemove}
+        onAddFolder={onAddFolder}
         matchesSearch={matchesSearch}
         hasMatchingChild={hasMatchingChild}
         defaultExpanded={!!searchMatchPaths || !!extMatchPaths}

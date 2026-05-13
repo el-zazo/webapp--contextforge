@@ -4,6 +4,7 @@ import {
   Folder,
   FolderOpen,
   FileText,
+  FolderPlus,
   Plus,
   Minus,
   Lock,
@@ -31,6 +32,7 @@ export default function FileTreeNode({
   selectedFileIds,
   onAddFile,
   onRemoveFile,
+  onAddFolder,
   matchesSearch,
   hasMatchingChild,
   defaultExpanded,
@@ -55,6 +57,14 @@ export default function FileTreeNode({
       onAddFile(node.id);
     },
     [node.id, onAddFile]
+  );
+
+  const handleAddFolderClick = useCallback(
+    (e) => {
+      e.stopPropagation();
+      onAddFolder(node.path);
+    },
+    [node.path, onAddFolder]
   );
 
   const handleRemoveClick = useCallback(
@@ -128,6 +138,15 @@ export default function FileTreeNode({
         )}
 
         {/* Action buttons */}
+        {isFolder && !isExcluded && !isDimmed && (
+          <button
+            onClick={handleAddFolderClick}
+            className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded bg-accent-muted text-accent hover:bg-accent/20 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+            title="Add all files in this folder"
+          >
+            <FolderPlus size={12} />
+          </button>
+        )}
         {!isFolder && !isExcluded && !node.isBinary && matchesSearch && !isDimmed && (
           <>
             {isSelected ? (

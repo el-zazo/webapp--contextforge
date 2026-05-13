@@ -362,3 +362,32 @@ export function getUniqueExtensions(files) {
   });
   return Array.from(exts).sort();
 }
+
+// ─── Folder batch-collection ─────────────────────────────────────────────────────
+
+/**
+ * Recursively walk a tree node and return a flat array of file IDs for every
+ * non-excluded, non-binary file found at any depth.
+ *
+ * @param {object}   folderNode      A tree node with `{ files: [...], subfolders: {...} }`.
+ * @param {string[]} patterns        Current exclusion patterns.
+ * @param {boolean}  caseSensitive   Case-sensitive matching flag.
+ * @returns {string[]} Array of file IDs.
+ */
+export function collectFolderFiles(folderNode, patterns, caseSensitive) {
+  const ids = [];
+
+  function walk(node) {
+    for (const file of node.files) {
+      if (file.isBinary) continue;
+      if (isFileExcluded(file, patterns, caseSensitive)) continue;
+      ids.push(file.id);
+    }
+    for (const sub of Object.values(node.subfolders)) {
+      walk(sub);
+    }
+  }
+
+  walk(folderNode);
+  return ids;
+}
