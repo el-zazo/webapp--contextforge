@@ -188,6 +188,10 @@ export default function ExclusionManager() {
                 <span className="text-text-muted">→ routes.js one level deep under src/</span>
               </p>
               <p>
+                <span className="text-accent">src/*/*/routes.js</span>{' '}
+                <span className="text-text-muted">→ routes.js exactly 2 levels deep under src/</span>
+              </p>
+              <p>
                 <span className="text-accent">src/**/*.test.js</span>{' '}
                 <span className="text-text-muted">→ Any .test.js file anywhere under src/</span>
               </p>
